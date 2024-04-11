@@ -1,1 +1,1 @@
-clang++ main.cpp -o main -fsanitize=undefined `pkg-config --cflags --libs aubio gtk4 libadwaita-1` -std=c++2b
+clang++ main.cpp -o main -fsanitize=undefined `pkg-config --cflags --libs gtk4 libadwaita-1` -std=c++2b

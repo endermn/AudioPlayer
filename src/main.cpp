@@ -1,7 +1,6 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <iostream>
-#include <aubio/aubio.h>
 #include <format>
 #include <vector>
 #include <algorithm>
@@ -13,8 +12,9 @@
 std::vector<std::string> played_file_path;
 
 ma_engine engine;
-ma_engine default_engine;
+
 ma_sound sound;
+bool is_sound_init = false;
 
 GtkWidget* song_list;
 double volume = 1;
@@ -45,7 +45,7 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 	}
 }
 
-static void get_file_dialog_result( GObject* source_object, GAsyncResult* res, gpointer data) {
+static void get_file_dialog_result( GObject* source_object, GAsyncResult* res,[[maybe_unused]] gpointer data ) {
 
 	GFile* file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source_object), res, NULL);
 	if (file == NULL)
@@ -78,7 +78,7 @@ static void get_file_dialog_result( GObject* source_object, GAsyncResult* res, g
 	g_object_unref(enumerator);
 }
 
-static void on_open_button_click(GtkButton* a, void* user_data) {
+static void on_open_button_click([[maybe_unused]]GtkButton* a, void* user_data) {
 
 	GtkFileDialog* file_chooser = gtk_file_dialog_new();
 	gtk_file_dialog_select_folder(file_chooser, GTK_WINDOW (user_data), NULL, get_file_dialog_result, NULL);
@@ -96,25 +96,45 @@ static void on_play_button_click() {
 		return;
 
 	std::string played_file = played_file_path[gtk_list_box_row_get_index(selected_row)];
-
-	engine = default_engine;
+	if (is_sound_init)
+		ma_sound_uninit(&sound);
 	ma_engine_set_volume(&engine, volume);
 
-	if (ma_engine_play_sound(&engine, played_file.c_str(), NULL) != MA_SUCCESS)
-		std::cerr << "CANNOT PLAY SOUND";
+	if (ma_sound_init_from_file(&engine, played_file.c_str(),0, NULL, NULL, &sound) != MA_SUCCESS) 
+		std::cerr << "CANNOT INIT SOUND";
+	is_sound_init = true;
+	if (ma_sound_start(&sound) != MA_SUCCESS) {
+		std::cerr << "CANNOT START SOUND \n";
+	}
 
 }
 
-static void on_timestamp_change() {
-
+static void on_timestamp_change(GtkRange* range,[[maybe_unused]] void* data) {
+	if (!is_sound_init)
+		return;
+	ma_uint64 sound_length;
+	ma_sound_get_length_in_pcm_frames(&sound, &sound_length);
+	double value = gtk_range_get_value(range);
+	std::cout << value << '\n';
+	ma_sound_seek_to_pcm_frame(&sound, value * sound_length);
 }
+
+static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* ,[[maybe_unused]] void* data) {
+	if (!is_sound_init)
+		return G_SOURCE_CONTINUE;
+	ma_uint64 ma_sound_length;
+	ma_sound_get_length_in_pcm_frames(&sound, &ma_sound_length);
+	gtk_range_set_value(GTK_RANGE(progress_bar),double (ma_sound_get_time_in_pcm_frames(&sound)) / double(ma_sound_length));
+	return G_SOURCE_CONTINUE;
+}
+
 
 static void on_volume_change(GtkRange* range, void* volume_data) {
 
 	auto data = (on_volume_change_data*) volume_data;
 	volume = gtk_range_get_value(range) / 100;
 
-	if (volume > 1)
+	if (volume >= 1)
 		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-overamplified-symbolic");
 	else if (volume > 0.7)
 		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-high-symbolic");
@@ -126,6 +146,7 @@ static void on_volume_change(GtkRange* range, void* volume_data) {
 		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-muted-symbolic");
 
 	ma_engine_set_volume(&engine, volume);
+
 }
 
 static void set_control_box(GtkWidget* control_button_box) {
@@ -145,17 +166,19 @@ static void activate_cb (GtkApplication *app)
 	GtkWidget* progress_bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 	GtkWidget* control_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 
-	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
+	GtkWidget* progress_start_label = gtk_label_new("0:00");
+	GtkWidget* progress_end_label = gtk_label_new("0:00");
 
-	GtkWidget* progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1);
+	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
+	GtkWidget* progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1);
 	
 	on_volume_change_data* volume_data = new on_volume_change_data {
-		.scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 200, 1),
+		.scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1),
 		.icon = gtk_image_new_from_icon_name("audio-volume-medium-symbolic"),
 	};
 
 
-	GtkLayoutManager* progress_constraint = gtk_constraint_layout_new();
+	// GtkLayoutManager* progress_constraint = gtk_constraint_layout_new();
 	// GtkConstraint* 
 
 	// gtk_constraint_layout_add_constraint();
@@ -167,26 +190,28 @@ static void activate_cb (GtkApplication *app)
 	gtk_widget_set_size_request(progress_bar, 600, 10);
 	gtk_widget_set_size_request(volume_data->scale, 200, 20);
 
-	
-
 	set_control_box(control_button_box);
 
 	gtk_widget_set_halign(progress_bar_box, GTK_ALIGN_CENTER);
 	gtk_widget_set_halign(volume_data->icon, GTK_ALIGN_END);
 	gtk_widget_set_vexpand(song_list, true);
-
+	// TODO: IMPLEMENT CHANGE-VALUE SIGNAL FOR PROGRESS BAR
 	g_signal_connect(progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
 	g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
 	g_signal_connect(play_button, "clicked", G_CALLBACK (on_play_button_click), NULL);
 	g_signal_connect(open_button, "clicked", G_CALLBACK(on_open_button_click), window);
 	
+	gtk_widget_add_tick_callback(progress_bar, progress_bar_tick, NULL, NULL);
+
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
 	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrollable_song_box), song_list);
 
 	gtk_box_append(GTK_BOX(control_button_box), play_button);
 	gtk_box_append(GTK_BOX(control_button_box), open_button);
+	gtk_box_append(GTK_BOX(progress_bar_box), progress_start_label);
 	gtk_box_append(GTK_BOX(progress_bar_box), progress_bar);
+	gtk_box_append(GTK_BOX(progress_bar_box), progress_end_label);
 	gtk_box_append(GTK_BOX(control_button_box), volume_data->icon);
 	gtk_box_append(GTK_BOX(control_button_box), volume_data->scale);
 
@@ -214,18 +239,17 @@ int main(int argc, char* argv[])
 	ma_resource_manager_init(&resource_manager_config, &resource_manager);
 	engineConfig.pResourceManager = &resource_manager;
 
-	ma_result result = ma_engine_init(&engineConfig, &engine);
+	if (ma_engine_init(&engineConfig, &engine) != MA_SUCCESS) {
+		std::cerr << "failed to init ma_engine from miniaudio library\n";
+		std::abort();
+	}
 	
-	default_engine = engine;
-
-	if (result != MA_SUCCESS)
-		return result;
-	
-	auto app = adw_application_new("org.viktor.attempt", G_APPLICATION_DEFAULT_FLAGS);
+	auto app = adw_application_new("org.gitcommitcrew.audio", G_APPLICATION_DEFAULT_FLAGS);
 
 	g_signal_connect (app, "activate", G_CALLBACK (activate_cb), NULL);
 
 
-
-	return g_application_run(G_APPLICATION (app), argc, argv);
+	auto result_code = g_application_run(G_APPLICATION (app), argc, argv);
+	ma_engine_uninit(&engine);
+	return result_code;
 }
