@@ -36,7 +36,9 @@ struct timestamp_labels {
 
 
 static bool check_valid_format(std::string_view file_name) {
-	
+	// * goes through every file in the file dialog and checks weather the type is correct
+
+
 	const std::array<std::string, 6> file_types = {".ogg", ".wav", ".mp3", ".flac", ".aiff", ".alac"}; 
 
 	for (auto ext : file_types) {
@@ -47,7 +49,8 @@ static bool check_valid_format(std::string_view file_name) {
 }
 
 static void append_songs_to_list(std::vector<std::string>* file_names) {
-	
+	// * Gets files from the file dialog result and adds them to a list box
+
 	for (std::string name : *file_names) {
 		auto song_label = gtk_label_new(name.c_str());
 		gtk_widget_set_vexpand(song_label, false);
@@ -134,12 +137,13 @@ static void on_timestamp_change(GtkRange* range, void*) {
 }
 
 static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void* data) {
+	// *	Moves the bar slider according to the time passed in the audio file
+
 	if (!is_sound_init) {
-		// ! this does not seem to make the bar unusable
-		gtk_widget_set_can_focus(progress_bar, false);
+		// * GTK RANGE DOES NOT GET FOCUSED WHEN BEING MOVED 
+		// gtk_widget_set_can_focus(progress_bar, false);
 		return G_SOURCE_CONTINUE;
 	}
-	// gtk_widget_set_can_focus(progress_bar, true);
 
 	auto bar = GTK_RANGE(progress_bar);
 	timestamp_labels* labels = (timestamp_labels *) data;
