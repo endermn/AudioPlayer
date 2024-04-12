@@ -14,14 +14,24 @@ std::vector<std::string> played_file_path;
 ma_engine engine;
 
 ma_sound sound;
+ma_uint64 sound_length;
+float sound_length_s;
+int end_min;
+int end_s;
+std::string end_time;
 bool is_sound_init = false;
 
 GtkWidget* song_list;
-double volume = 1;
+double volume = 0.1;
 
+gulong progress_bar_id = 0;
 struct on_volume_change_data {
 	GtkWidget* scale;
 	GtkWidget* icon;
+};
+struct timestamp_labels {
+	GtkWidget* start;
+	GtkWidget* end;
 };
 
 
@@ -85,7 +95,7 @@ static void on_open_button_click([[maybe_unused]]GtkButton* a, void* user_data) 
 	g_object_unref(file_chooser);
 }
 
-static void on_play_button_click() {
+static void on_play_button_click(GtkButton*, void* data) {
 	
 	if (played_file_path.size() == 0)
 		return;
@@ -103,28 +113,56 @@ static void on_play_button_click() {
 	if (ma_sound_init_from_file(&engine, played_file.c_str(),0, NULL, NULL, &sound) != MA_SUCCESS) 
 		std::cerr << "CANNOT INIT SOUND";
 	is_sound_init = true;
+	ma_sound_get_length_in_pcm_frames(&sound, &sound_length);
+	ma_sound_get_length_in_seconds(&sound, &sound_length_s);
+	end_min = int(sound_length_s) / 60;
+	end_s = int(sound_length_s) % 60;
+	end_time = std::to_string(end_min) + (end_s < 10 ? ":0" : ":") + std::to_string(end_s);
+	gtk_range_set_value(GTK_RANGE(data), 0);
+
 	if (ma_sound_start(&sound) != MA_SUCCESS) {
 		std::cerr << "CANNOT START SOUND \n";
 	}
-
+	
 }
-
-static void on_timestamp_change(GtkRange* range,[[maybe_unused]] void* data) {
+static void on_timestamp_change(GtkRange* range, void*) {
 	if (!is_sound_init)
 		return;
-	ma_uint64 sound_length;
-	ma_sound_get_length_in_pcm_frames(&sound, &sound_length);
+
 	double value = gtk_range_get_value(range);
-	std::cout << value << '\n';
 	ma_sound_seek_to_pcm_frame(&sound, value * sound_length);
 }
 
-static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* ,[[maybe_unused]] void* data) {
-	if (!is_sound_init)
+static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void* data) {
+	if (!is_sound_init) {
+		// ! this does not seem to make the bar unusable
+		gtk_widget_set_can_focus(progress_bar, false);
 		return G_SOURCE_CONTINUE;
-	ma_uint64 ma_sound_length;
-	ma_sound_get_length_in_pcm_frames(&sound, &ma_sound_length);
-	gtk_range_set_value(GTK_RANGE(progress_bar),double (ma_sound_get_time_in_pcm_frames(&sound)) / double(ma_sound_length));
+	}
+	// gtk_widget_set_can_focus(progress_bar, true);
+
+	auto bar = GTK_RANGE(progress_bar);
+	timestamp_labels* labels = (timestamp_labels *) data;
+	double value = double (ma_sound_get_time_in_pcm_frames(&sound)) / double(sound_length);
+
+	gtk_label_set_text(GTK_LABEL(labels->end), end_time.c_str());
+
+	double current_ms = double (ma_sound_get_time_in_milliseconds(&sound));
+	int current_s = current_ms / 1000;
+	int current_min = current_s / 60;
+	
+	std::string current_time = std::to_string(current_min) + (current_s % 60 < 10 ? ":0" : ":") + std::to_string(current_s % 60);
+	
+	gtk_label_set_text(GTK_LABEL(labels->start), current_time.c_str());
+
+	if (progress_bar_id != 0)
+		g_signal_handler_disconnect(bar, progress_bar_id);
+	
+	gtk_label_set_text(GTK_LABEL(labels->start), gtk_label_get_text(GTK_LABEL(labels->start)));
+	gtk_range_set_value(bar, value);
+
+	progress_bar_id = g_signal_connect(progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
+
 	return G_SOURCE_CONTINUE;
 }
 
@@ -166,8 +204,10 @@ static void activate_cb (GtkApplication *app)
 	GtkWidget* progress_bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 	GtkWidget* control_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 
-	GtkWidget* progress_start_label = gtk_label_new("0:00");
-	GtkWidget* progress_end_label = gtk_label_new("0:00");
+	timestamp_labels* labels = new timestamp_labels{
+		.start = gtk_label_new("0:00"),
+		.end = gtk_label_new("0:00"),
+	};
 
 	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
 	GtkWidget* progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1);
@@ -195,13 +235,13 @@ static void activate_cb (GtkApplication *app)
 	gtk_widget_set_halign(progress_bar_box, GTK_ALIGN_CENTER);
 	gtk_widget_set_halign(volume_data->icon, GTK_ALIGN_END);
 	gtk_widget_set_vexpand(song_list, true);
-	// TODO: IMPLEMENT CHANGE-VALUE SIGNAL FOR PROGRESS BAR
-	g_signal_connect(progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
+	
+	progress_bar_id = g_signal_connect(progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
 	g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
-	g_signal_connect(play_button, "clicked", G_CALLBACK (on_play_button_click), NULL);
+	g_signal_connect(play_button, "clicked", G_CALLBACK (on_play_button_click), progress_bar);
 	g_signal_connect(open_button, "clicked", G_CALLBACK(on_open_button_click), window);
 	
-	gtk_widget_add_tick_callback(progress_bar, progress_bar_tick, NULL, NULL);
+	gtk_widget_add_tick_callback(progress_bar, progress_bar_tick, labels, NULL);
 
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
@@ -209,9 +249,9 @@ static void activate_cb (GtkApplication *app)
 
 	gtk_box_append(GTK_BOX(control_button_box), play_button);
 	gtk_box_append(GTK_BOX(control_button_box), open_button);
-	gtk_box_append(GTK_BOX(progress_bar_box), progress_start_label);
+	gtk_box_append(GTK_BOX(progress_bar_box), labels->start);
 	gtk_box_append(GTK_BOX(progress_bar_box), progress_bar);
-	gtk_box_append(GTK_BOX(progress_bar_box), progress_end_label);
+	gtk_box_append(GTK_BOX(progress_bar_box), labels->end);
 	gtk_box_append(GTK_BOX(control_button_box), volume_data->icon);
 	gtk_box_append(GTK_BOX(control_button_box), volume_data->scale);
 
