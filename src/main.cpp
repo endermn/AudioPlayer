@@ -9,6 +9,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
+
 std::vector<std::string> played_file_path;
 
 ma_engine engine;
@@ -33,7 +34,6 @@ struct timestamp_labels {
 	GtkWidget* start;
 	GtkWidget* end;
 };
-
 
 static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
@@ -129,9 +129,11 @@ static void on_play_button_click(GtkButton*, void* data) {
 	
 }
 static void on_timestamp_change(GtkRange* range, void*) {
+	// * Called on value-changed signal on the progress_bar widget
+	// * Changes the sound time
+
 	if (!is_sound_init)
 		return;
-
 	double value = gtk_range_get_value(range);
 	ma_sound_seek_to_pcm_frame(&sound, value * sound_length);
 }
@@ -140,13 +142,13 @@ static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void
 	// *	Moves the bar slider according to the time passed in the audio file
 
 	if (!is_sound_init) {
-		// * GTK RANGE DOES NOT GET FOCUSED WHEN BEING MOVED 
+		// * RANGE DOES NOT GET FOCUSED WHEN BEING MOVED 
 		// gtk_widget_set_can_focus(progress_bar, false);
 		return G_SOURCE_CONTINUE;
 	}
 
 	auto bar = GTK_RANGE(progress_bar);
-	timestamp_labels* labels = (timestamp_labels *) data;
+	auto labels = (timestamp_labels *) data;
 	double value = double (ma_sound_get_time_in_pcm_frames(&sound)) / double(sound_length);
 
 	gtk_label_set_text(GTK_LABEL(labels->end), end_time.c_str());
@@ -201,6 +203,7 @@ static void set_control_box(GtkWidget* control_button_box) {
 static void activate_cb (GtkApplication *app)
 {
 	GtkWidget* window = adw_application_window_new (app);
+	
 
 	GtkWidget* tool_bar = adw_header_bar_new();
 	GtkWidget* play_button = gtk_button_new_with_label("Play");
@@ -244,8 +247,9 @@ static void activate_cb (GtkApplication *app)
 	g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
 	g_signal_connect(play_button, "clicked", G_CALLBACK (on_play_button_click), progress_bar);
 	g_signal_connect(open_button, "clicked", G_CALLBACK(on_open_button_click), window);
-	
+
 	gtk_widget_add_tick_callback(progress_bar, progress_bar_tick, labels, NULL);
+	
 
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
