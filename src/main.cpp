@@ -24,6 +24,7 @@ bool is_sound_init = false;
 
 GtkWidget* song_list;
 double volume = 0.1;
+const std::array<std::string, 6> file_types = {".ogg", ".wav", ".mp3", ".flac", ".aiff", ".alac"}; 
 
 gulong progress_bar_id = 0;
 struct on_volume_change_data {
@@ -38,9 +39,6 @@ struct timestamp_labels {
 static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
 
-
-	const std::array<std::string, 6> file_types = {".ogg", ".wav", ".mp3", ".flac", ".aiff", ".alac"}; 
-
 	for (auto ext : file_types) {
 		if (file_name.find(ext) != std::string_view::npos)
 			return true;
@@ -52,6 +50,12 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 	// * Gets files from the file dialog result and adds them to a list box
 
 	for (std::string name : *file_names) {
+		for (std::string ext : file_types) {
+			auto start_pos = name.find(ext);
+			if (start_pos > name.size())
+				continue;
+			name.erase(start_pos, ext.size());
+		}
 		auto song_label = gtk_label_new(name.c_str());
 		gtk_widget_set_vexpand(song_label, false);
 		gtk_list_box_append(GTK_LIST_BOX(song_list), song_label);
@@ -97,9 +101,20 @@ static void on_open_button_click([[maybe_unused]]GtkButton* a, void* user_data) 
 	gtk_file_dialog_select_folder(file_chooser, GTK_WINDOW (user_data), NULL, get_file_dialog_result, NULL);
 	g_object_unref(file_chooser);
 }
+static void save_sound_length() {
+// * Gets the current length of the played sound and saves it in a global variable
+
+	is_sound_init = true;
+	ma_sound_get_length_in_pcm_frames(&sound, &sound_length);
+	ma_sound_get_length_in_seconds(&sound, &sound_length_s);
+	end_min = int(sound_length_s) / 60;
+	end_s = int(sound_length_s) % 60;
+	end_time = std::to_string(end_min) + (end_s < 10 ? ":0" : ":") + std::to_string(end_s);
+}
 
 static void on_play_button_click(GtkButton*, void* data) {
-	
+// * Plays the selected song and resets the current_time label to 0:00
+
 	if (played_file_path.size() == 0)
 		return;
 
@@ -113,20 +128,20 @@ static void on_play_button_click(GtkButton*, void* data) {
 		ma_sound_uninit(&sound);
 	ma_engine_set_volume(&engine, volume);
 
-	if (ma_sound_init_from_file(&engine, played_file.c_str(),0, NULL, NULL, &sound) != MA_SUCCESS) 
+	if (ma_sound_init_from_file(&engine, played_file.c_str(),0, NULL, NULL, &sound) != MA_SUCCESS) {
 		std::cerr << "CANNOT INIT SOUND";
-	is_sound_init = true;
-	ma_sound_get_length_in_pcm_frames(&sound, &sound_length);
-	ma_sound_get_length_in_seconds(&sound, &sound_length_s);
-	end_min = int(sound_length_s) / 60;
-	end_s = int(sound_length_s) % 60;
-	end_time = std::to_string(end_min) + (end_s < 10 ? ":0" : ":") + std::to_string(end_s);
+		return;
+	}
+
+	save_sound_length();
+
 	gtk_range_set_value(GTK_RANGE(data), 0);
 
 	if (ma_sound_start(&sound) != MA_SUCCESS) {
 		std::cerr << "CANNOT START SOUND \n";
+		return;
 	}
-	
+
 }
 static void on_timestamp_change(GtkRange* range, void*) {
 	// * Called on value-changed signal on the progress_bar widget
@@ -174,7 +189,7 @@ static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void
 
 
 static void on_volume_change(GtkRange* range, void* volume_data) {
-
+// * Changes volume icon accordingly
 	auto data = (on_volume_change_data*) volume_data;
 	volume = gtk_range_get_value(range) / 100;
 
@@ -200,31 +215,28 @@ static void set_control_box(GtkWidget* control_button_box) {
 	gtk_widget_set_margin_bottom(control_button_box, 10);
 }
 
-static void activate_cb (GtkApplication *app)
-{
-	GtkWidget* window = adw_application_window_new (app);
-	
+static GtkWidget* create_gui(GtkWidget* window) {
 
 	GtkWidget* tool_bar = adw_header_bar_new();
 	GtkWidget* play_button = gtk_button_new_with_label("Play");
 	GtkWidget* open_button = gtk_button_new_with_label("Open");
+	GtkWidget* progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1);
+
 	GtkWidget* progress_bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 	GtkWidget* control_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
 
 	timestamp_labels* labels = new timestamp_labels{
 		.start = gtk_label_new("0:00"),
 		.end = gtk_label_new("0:00"),
 	};
 
-	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
-	GtkWidget* progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1);
-	
 	on_volume_change_data* volume_data = new on_volume_change_data {
 		.scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1),
 		.icon = gtk_image_new_from_icon_name("audio-volume-medium-symbolic"),
 	};
 
-
+//TODO: Implement constraint layout
 	// GtkLayoutManager* progress_constraint = gtk_constraint_layout_new();
 	// GtkConstraint* 
 
@@ -250,30 +262,36 @@ static void activate_cb (GtkApplication *app)
 
 	gtk_widget_add_tick_callback(progress_bar, progress_bar_tick, labels, NULL);
 	
-
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
 	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrollable_song_box), song_list);
 
 	gtk_box_append(GTK_BOX(control_button_box), play_button);
 	gtk_box_append(GTK_BOX(control_button_box), open_button);
+	gtk_box_append(GTK_BOX(control_button_box), volume_data->icon);
+	gtk_box_append(GTK_BOX(control_button_box), volume_data->scale);
+
 	gtk_box_append(GTK_BOX(progress_bar_box), labels->start);
 	gtk_box_append(GTK_BOX(progress_bar_box), progress_bar);
 	gtk_box_append(GTK_BOX(progress_bar_box), labels->end);
-	gtk_box_append(GTK_BOX(control_button_box), volume_data->icon);
-	gtk_box_append(GTK_BOX(control_button_box), volume_data->scale);
 
 	gtk_box_append(GTK_BOX(main_box), tool_bar);
 	gtk_box_append(GTK_BOX(main_box), scrollable_song_box);
 	gtk_box_append(GTK_BOX(main_box), progress_bar_box);
 	gtk_box_append(GTK_BOX(main_box), control_button_box);
 
+	return main_box;
+}
 
+static void activate_cb (GtkApplication *app)
+{
+	GtkWidget* window = adw_application_window_new (app);
+	
 	gtk_window_set_title (GTK_WINDOW (window), "AudioPlayer");
 	gtk_window_set_default_size (GTK_WINDOW (window), 1200, 700);
 	gtk_widget_set_size_request(window, 300, 300);
 
-	adw_application_window_set_content(ADW_APPLICATION_WINDOW (window), main_box);
+	adw_application_window_set_content(ADW_APPLICATION_WINDOW (window), create_gui(window));
 
 	gtk_window_present (GTK_WINDOW (window));
 }
@@ -295,7 +313,6 @@ int main(int argc, char* argv[])
 	auto app = adw_application_new("org.gitcommitcrew.audio", G_APPLICATION_DEFAULT_FLAGS);
 
 	g_signal_connect (app, "activate", G_CALLBACK (activate_cb), NULL);
-
 
 	auto result_code = g_application_run(G_APPLICATION (app), argc, argv);
 	ma_engine_uninit(&engine);
