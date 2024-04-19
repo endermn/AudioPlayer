@@ -9,7 +9,6 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
-
 std::vector<std::string> played_file_path;
 
 ma_engine engine;
@@ -20,11 +19,10 @@ float sound_length_s;
 int end_min;
 int end_s;
 std::string end_time;
+
 bool is_sound_init = false;
-
 bool is_sound_paused = false;
-
-ma_uint64 pause_pcm = 0;
+bool volume_changed = false;
 
 GtkWidget* song_list;
 double volume = 0.1;
@@ -34,6 +32,7 @@ GtkListBoxRow* clicked_row = NULL;
 const std::array<std::string, 6> file_types = {".ogg", ".wav", ".mp3", ".flac", ".aiff", ".alac"}; 
 
 gulong progress_bar_id = 0;
+gulong volume_bar_id = 0;
 gulong double_click_id = 0;
 struct on_volume_change_data {
 	GtkWidget* scale;
@@ -47,7 +46,9 @@ struct song_controller {
 	GtkWidget* play_button;
 	GtkWidget* open_button;
 	GtkWidget* progress_bar;
+	on_volume_change_data* volume_data;
 };
+
 
 static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
@@ -166,6 +167,10 @@ static void play_sound(GtkButton* button, void* progress_bar) {
  * and updates the label of the provided button widget to "Pause" to reflect the current state.
  * 
  * @param button The button widget used for controlling playback.
+ * 
+ * @bug There's an issue where if you change the progress bar value while paused
+ * and you proceed to play it after, the progress bar will jump back for a split second
+ * after which it will proceed like normal
  */
 static void sound_continue(GtkButton* button) {
     ma_sound_start(&sound);
@@ -193,7 +198,7 @@ static void sound_pause(GtkButton* button) {
  * 
  * @param button The button widget used for controlling playback.
  */
-static void toggle_pause(GtkButton* button, void* ) {
+static void toggle_playback_state(GtkButton* button, void* ) {
     if (!is_sound_init)
         return;
     is_sound_paused ? sound_continue(button) : sound_pause(button);
@@ -245,31 +250,63 @@ static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void
 	return G_SOURCE_CONTINUE;
 }
 
-
-static void on_volume_change(GtkRange* range, void* volume_data) {
-/** Changes volume icon according to the @param volume_data
-* @param range used to get the current value from the volume bar
-*/
-
-	auto data = (on_volume_change_data*) volume_data;
-	volume = gtk_range_get_value(range) / 100;
-
-	if (volume >= 1)
-		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-overamplified-symbolic");
-	else if (volume > 0.7)
-		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-high-symbolic");
-	else if (volume > 0.4)
-		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-medium-symbolic");
-	else if (volume > 0)
-		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-low-symbolic");
-	else
-		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-muted-symbolic");
-
-	ma_engine_set_volume(&engine, volume);
-
+static void change_volume_icon(on_volume_change_data* data) {
+    if (volume >= 1)
+        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-overamplified-symbolic");
+    else if (volume > 0.7)
+        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-high-symbolic");
+    else if (volume > 0.4)
+        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-medium-symbolic");
+    else if (volume > 0)
+        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-low-symbolic");
+    else
+        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-muted-symbolic");
 }
 
+static void on_volume_change(GtkRange* range, void* volume_data) {
+    auto data = (on_volume_change_data*) volume_data;
+    volume = gtk_range_get_value(range) / 100;
+    change_volume_icon(data);
+    ma_engine_set_volume(&engine, volume);
+}
+
+static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , GdkModifierType , void* data) {
+    auto song_data = (song_controller*) data;
+	if (!song_data) {
+		std::cerr << "Error: song_data pointer is null\n";
+		return GDK_EVENT_STOP;
+	}
+    switch (keyval) {
+		case GDK_KEY_space:
+			toggle_playback_state(GTK_BUTTON(song_data->play_button), NULL);
+			break;
+        case GDK_KEY_Up:
+            volume += 0.1;
+            if (volume > 1.0) volume = 1.0;
+            break;
+        case GDK_KEY_Down:
+            volume -= 0.1;
+            if (volume < 0.0) volume = 0.0;
+            break;
+        default:
+            break;
+    }
+	if (!song_data->volume_data) {
+        std::cerr << "Error: volume_data pointer is null\n";
+        return GDK_EVENT_STOP;
+    }
+    gtk_range_set_value(GTK_RANGE(song_data->volume_data->scale), volume * 100);
+    change_volume_icon(song_data->volume_data);
+    ma_engine_set_volume(&engine, volume);
+
+    return GDK_EVENT_STOP;
+}
+
+
+
 static void set_control_box(GtkWidget* control_button_box) {
+/** @brief used to change the controlbox 
+*/
 	gtk_widget_set_can_focus(control_button_box, false);
 	gtk_widget_set_halign(control_button_box, GTK_ALIGN_CENTER);
 	gtk_widget_set_margin_top(control_button_box, 12);
@@ -283,20 +320,11 @@ static void select_song(GtkListBox* box, GtkListBoxRow* , void* data) {
 }
 
 static GtkWidget* create_gui(GtkWidget* window) {
-
+/** @brief main function for the gui
+ * @param window is used for the gui
+*/
 	GtkWidget* tool_bar = adw_header_bar_new();
 	
-	song_controller* song_control = new song_controller{
-		.play_button = gtk_button_new_with_label("Play"),
-		.open_button = gtk_button_new_with_label("Open"),
-		.progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1),
-	};
-
-	GtkWidget* progress_bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-	GtkWidget* control_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
-
-
 	timestamp_labels* labels = new timestamp_labels{
 		.start = gtk_label_new("0:00"),
 		.end = gtk_label_new("0:00"),
@@ -306,6 +334,19 @@ static GtkWidget* create_gui(GtkWidget* window) {
 		.scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1),
 		.icon = gtk_image_new_from_icon_name("audio-volume-medium-symbolic"),
 	};
+
+	song_controller* song_control = new song_controller{
+		.play_button = gtk_button_new_with_label("Play"),
+		.open_button = gtk_button_new_with_label("Open"),
+		.progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1),
+		.volume_data = volume_data,
+	};
+
+	GtkWidget* progress_bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+	GtkWidget* control_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+	GtkWidget* scrollable_song_box = gtk_scrolled_window_new();
+
+
 
 //TODO: Implement constraint layout
 	// GtkLayoutManager* progress_constraint = gtk_constraint_layout_new();
@@ -318,6 +359,7 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	GtkGesture* controller = gtk_gesture_click_new();
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(controller), 0);
 
+	GtkEventController* event_controller = gtk_event_controller_key_new();
 
 	gtk_range_set_value(GTK_RANGE(volume_data->scale), volume * 100);
 
@@ -330,16 +372,18 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	gtk_widget_set_halign(volume_data->icon, GTK_ALIGN_END);
 	gtk_widget_set_vexpand(song_list, true);
 	
+
 	progress_bar_id = g_signal_connect(song_control->progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
-	g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
-	g_signal_connect(song_control->play_button, "clicked", G_CALLBACK (toggle_pause), NULL);
+	g_signal_connect(event_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
+	volume_bar_id = g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
+	g_signal_connect(song_control->play_button, "clicked", G_CALLBACK (toggle_playback_state), NULL);
 	// g_signal_connect(pause_button, "clicked", G_CALLBACK(on_pause_button_click), NULL);
 	g_signal_connect(song_control->open_button, "clicked", G_CALLBACK(on_open_button_click), window);
 	g_signal_connect(song_list, "row-activated", G_CALLBACK(select_song), song_control);
 	// g_signal_connect_after(controller, "released", G_CALLBACK(on_double_click), progress_bar);
 
+	gtk_widget_add_controller(song_list, event_controller);
 	gtk_widget_add_tick_callback(song_control->progress_bar, progress_bar_tick, labels, NULL);
-	// gtk_widget_add_controller(song_list, GTK_EVENT_CONTROLLER(controller));
 	
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
@@ -377,6 +421,7 @@ static void activate_cb (GtkApplication *app)
 
 int main(int argc, char* argv[])
 {
+
 	ma_engine_config engineConfig = ma_engine_config_init();
 	ma_resource_manager resource_manager;
 	auto resource_manager_config = ma_resource_manager_config_init();
@@ -393,7 +438,8 @@ int main(int argc, char* argv[])
 
 	g_signal_connect (app, "activate", G_CALLBACK (activate_cb), NULL);
 
-	auto result_code = g_application_run(G_APPLICATION (app), argc, argv);
+	int result_code = g_application_run(G_APPLICATION (app), argc, argv);
 	ma_engine_uninit(&engine);
+
 	return result_code;
 }
