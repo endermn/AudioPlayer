@@ -1,13 +1,15 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <iostream>
 #include <format>
 #include <vector>
 #include <algorithm>
 #include <optional>
 
+#include "Logger.hpp"
+
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
+
 
 std::vector<std::string> played_file_path;
 
@@ -27,13 +29,14 @@ bool volume_changed = false;
 GtkWidget* song_list;
 double volume = 0.1;
 
-GtkListBoxRow* clicked_row = NULL;
+GtkListBoxRow* selected_row = NULL;
 
 const std::array<std::string, 6> file_types = {".ogg", ".wav", ".mp3", ".flac", ".aiff", ".alac"}; 
 
 gulong progress_bar_id = 0;
 gulong volume_bar_id = 0;
 gulong double_click_id = 0;
+
 struct on_volume_change_data {
 	GtkWidget* scale;
 	GtkWidget* icon;
@@ -125,16 +128,15 @@ static void save_sound_length() {
 	end_min = int(sound_length_s) / 60;
 	end_s = int(sound_length_s) % 60;
 	end_time = std::to_string(end_min) + (end_s < 10 ? ":0" : ":") + std::to_string(end_s);
-}
+}	
+
 
 static void play_sound(GtkButton* button, void* progress_bar) {
 // * Plays the selected song and resets the current_time label to 0:00
-
 	if (played_file_path.size() == 0)
 		return;
 
-	GtkListBoxRow* selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(song_list));
-
+	selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(song_list));
 	if (selected_row == NULL)
 		return;
 
@@ -143,8 +145,8 @@ static void play_sound(GtkButton* button, void* progress_bar) {
 		ma_sound_uninit(&sound);
 	ma_engine_set_volume(&engine, volume);
 
-	if (ma_sound_init_from_file(&engine, played_file.c_str(),0, NULL, NULL, &sound) != MA_SUCCESS) {
-		std::cerr << "CANNOT INIT SOUND";
+	if (ma_sound_init_from_file(&engine, played_file.c_str(), 0, NULL, NULL, &sound) != MA_SUCCESS) {
+		logger.log("CANNOT INIT SOUND", ERROR);
 		return;
 	}
 
@@ -153,7 +155,7 @@ static void play_sound(GtkButton* button, void* progress_bar) {
 	gtk_range_set_value(GTK_RANGE(progress_bar), 0);
 
 	if (ma_sound_start(&sound) != MA_SUCCESS) {
-		std::cerr << "CANNOT START SOUND \n";
+		logger.log("CANNOT START SOUND", ERROR);
 		return;
 	}
 	gtk_button_set_label(button, "Pause");
@@ -216,15 +218,49 @@ static void on_timestamp_change(GtkRange* range, void*) {
 	ma_sound_seek_to_pcm_frame(&sound, value * sound_length);
 }
 
+static void start_next_sound() {
+
+	ma_sound_uninit(&sound);
+
+	int selected_row_index = gtk_list_box_row_get_index(selected_row);
+	int new_row_index = selected_row_index + 1;
+	int total_songs = played_file_path.size();
+
+	if (new_row_index >= total_songs) {
+		new_row_index = 0;
+	}
+
+	std::string played_file = played_file_path[new_row_index];
+
+	
+	logger.log("Starting next song", INFO);
+
+	if (ma_sound_init_from_file(&engine, played_file.c_str(), 0, NULL, NULL, &sound) != MA_SUCCESS) {
+		logger.log("CANNOT INIT SOUND", ERROR);
+		return;
+	}
+
+	save_sound_length();
+
+	if (ma_sound_start(&sound) != MA_SUCCESS) {
+		logger.log("CANNOT START SOUND", ERROR);
+		return;
+	}
+	selected_row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(song_list), new_row_index);
+}
+
 static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void* data) {
 	// * Moves the bar slider according to the time passed in the audio file
 
 	if (!is_sound_init || is_sound_paused) {
-		// * RANGE DOES NOT GET FOCUSED WHEN BEING MOVED 
-		// gtk_widget_set_can_focus(progress_bar, false);
 		return G_SOURCE_CONTINUE;
 	}
 
+	if (ma_sound_at_end(&sound)) {
+		start_next_sound();
+		gtk_range_set_value(GTK_RANGE(progress_bar), 0);
+	}
+	
 	auto bar = GTK_RANGE(progress_bar);
 	auto labels = (timestamp_labels *) data;
 	double value = double (ma_sound_get_time_in_pcm_frames(&sound)) / double(sound_length);
@@ -273,12 +309,23 @@ static void on_volume_change(GtkRange* range, void* volume_data) {
 static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , GdkModifierType , void* data) {
     auto song_data = (song_controller*) data;
 	if (!song_data) {
-		std::cerr << "Error: song_data pointer is null\n";
+		logger.log("Error: song_data pointer is null", ERROR);
 		return GDK_EVENT_STOP;
 	}
+	auto bar = song_data->progress_bar;
+	double range_value = gtk_range_get_value(GTK_RANGE(bar));
+
     switch (keyval) {
 		case GDK_KEY_space:
 			toggle_playback_state(GTK_BUTTON(song_data->play_button), NULL);
+			break;
+		case GDK_KEY_Left:
+			range_value -= 0.1;
+			if (range_value < 0) range_value = 0;
+			break;
+		case GDK_KEY_Right:
+			range_value += 0.1;
+			if (range_value > 1) range_value = 1;
 			break;
         case GDK_KEY_Up:
             volume += 0.1;
@@ -292,9 +339,10 @@ static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , Gd
             break;
     }
 	if (!song_data->volume_data) {
-        std::cerr << "Error: volume_data pointer is null\n";
+        logger.log("volume_data pointer is null", ERROR);
         return GDK_EVENT_STOP;
     }
+	gtk_range_set_value(GTK_RANGE(bar), range_value);
     gtk_range_set_value(GTK_RANGE(song_data->volume_data->scale), volume * 100);
     change_volume_icon(song_data->volume_data);
     ma_engine_set_volume(&engine, volume);
@@ -356,10 +404,12 @@ static GtkWidget* create_gui(GtkWidget* window) {
 
 	song_list = gtk_list_box_new();
 
+
 	GtkGesture* controller = gtk_gesture_click_new();
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(controller), 0);
 
 	GtkEventController* event_controller = gtk_event_controller_key_new();
+	GtkEventController* window_controller = gtk_event_controller_key_new();
 
 	gtk_range_set_value(GTK_RANGE(volume_data->scale), volume * 100);
 
@@ -372,9 +422,12 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	gtk_widget_set_halign(volume_data->icon, GTK_ALIGN_END);
 	gtk_widget_set_vexpand(song_list, true);
 	
+	gtk_widget_set_can_focus(song_control->progress_bar, FALSE);
 
 	progress_bar_id = g_signal_connect(song_control->progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
 	g_signal_connect(event_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
+	g_signal_connect(window_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
+	
 	volume_bar_id = g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
 	g_signal_connect(song_control->play_button, "clicked", G_CALLBACK (toggle_playback_state), NULL);
 	// g_signal_connect(pause_button, "clicked", G_CALLBACK(on_pause_button_click), NULL);
@@ -382,7 +435,9 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	g_signal_connect(song_list, "row-activated", G_CALLBACK(select_song), song_control);
 	// g_signal_connect_after(controller, "released", G_CALLBACK(on_double_click), progress_bar);
 
+	gtk_widget_add_controller(window, window_controller);
 	gtk_widget_add_controller(song_list, event_controller);
+	// gtk_widget_add_controller(window, event_controller);
 	gtk_widget_add_tick_callback(song_control->progress_bar, progress_bar_tick, labels, NULL);
 	
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -430,7 +485,7 @@ int main(int argc, char* argv[])
 	engineConfig.pResourceManager = &resource_manager;
 
 	if (ma_engine_init(&engineConfig, &engine) != MA_SUCCESS) {
-		std::cerr << "failed to init ma_engine from miniaudio library\n";
+		logger.log("failed to init engine from miniaudio", ERROR);
 		std::abort();
 	}
 	
