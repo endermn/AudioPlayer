@@ -128,22 +128,10 @@ static void save_sound_length() {
 	end_min = int(sound_length_s) / 60;
 	end_s = int(sound_length_s) % 60;
 	end_time = std::to_string(end_min) + (end_s < 10 ? ":0" : ":") + std::to_string(end_s);
-}	
+}
 
-
-static void play_sound(GtkButton* button, void* progress_bar) {
-// * Plays the selected song and resets the current_time label to 0:00
-	if (played_file_path.size() == 0)
-		return;
-
-	selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(song_list));
-	if (selected_row == NULL)
-		return;
-
-	std::string played_file = played_file_path[gtk_list_box_row_get_index(selected_row)];
-	if (is_sound_init)
-		ma_sound_uninit(&sound);
-	ma_engine_set_volume(&engine, volume);
+static void play_sound(std::string played_file) {
+	ma_sound_uninit(&sound);
 
 	if (ma_sound_init_from_file(&engine, played_file.c_str(), 0, NULL, NULL, &sound) != MA_SUCCESS) {
 		logger.log("CANNOT INIT SOUND", ERROR);
@@ -152,21 +140,50 @@ static void play_sound(GtkButton* button, void* progress_bar) {
 
 	save_sound_length();
 
-	gtk_range_set_value(GTK_RANGE(progress_bar), 0);
-
 	if (ma_sound_start(&sound) != MA_SUCCESS) {
 		logger.log("CANNOT START SOUND", ERROR);
 		return;
 	}
+}
+
+static void start_next_sound() {
+
+	int selected_row_index = gtk_list_box_row_get_index(selected_row);
+	int new_row_index = selected_row_index + 1;
+	int total_songs = played_file_path.size();
+
+	if (new_row_index >= total_songs) {
+		new_row_index = 0;
+	}
+
+	play_sound(played_file_path[new_row_index]);
+
+	selected_row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(song_list), new_row_index);
+}
+
+static void select_sound_from_list(GtkButton* button, void* progress_bar) {
+// * Plays the selected song and resets the current_time label to 0:00
+
+	if (played_file_path.size() == 0)
+		return;
+	is_sound_paused = false;
+
+	selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(song_list));
+	if (selected_row == NULL)
+		return;
+	
+	ma_engine_set_volume(&engine, volume);
+
+	play_sound(played_file_path[gtk_list_box_row_get_index(selected_row)]);
+
+	gtk_range_set_value(GTK_RANGE(progress_bar), 0);
+
 	gtk_button_set_label(button, "Pause");
 
 }
 /**
  * @brief Resumes playback of the audio.
  * 
- * This function resumes playback of the audio by starting the sound from the current position.
- * It sets the `is_sound_paused` flag to false to indicate that the sound is not paused anymore,
- * and updates the label of the provided button widget to "Pause" to reflect the current state.
  * 
  * @param button The button widget used for controlling playback.
  * 
@@ -207,51 +224,24 @@ static void toggle_playback_state(GtkButton* button, void* ) {
 }
 
 
-static void on_timestamp_change(GtkRange* range, void*) {
-	/** @param range used to get the value of the progress_bar 
-	* Called on value-changed signal on the progress_bar widget
-	* Changes the sound time
-	*/
+/** @brief
+* Called on value-changed signal on the progress_bar widget
+* Changes the sound time
+*/
+static void on_timestamp_change(GtkRange* progress_bar, void*) {
 	if (!is_sound_init)
 		return;
-	double value = gtk_range_get_value(range);
+	double value = gtk_range_get_value(progress_bar);
 	ma_sound_seek_to_pcm_frame(&sound, value * sound_length);
 }
 
-static void start_next_sound() {
-
-	ma_sound_uninit(&sound);
-
-	int selected_row_index = gtk_list_box_row_get_index(selected_row);
-	int new_row_index = selected_row_index + 1;
-	int total_songs = played_file_path.size();
-
-	if (new_row_index >= total_songs) {
-		new_row_index = 0;
-	}
-
-	std::string played_file = played_file_path[new_row_index];
-
-	
-	logger.log("Starting next song", INFO);
-
-	if (ma_sound_init_from_file(&engine, played_file.c_str(), 0, NULL, NULL, &sound) != MA_SUCCESS) {
-		logger.log("CANNOT INIT SOUND", ERROR);
-		return;
-	}
-
-	save_sound_length();
-
-	if (ma_sound_start(&sound) != MA_SUCCESS) {
-		logger.log("CANNOT START SOUND", ERROR);
-		return;
-	}
-	selected_row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(song_list), new_row_index);
-}
 
 static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void* data) {
 	// * Moves the bar slider according to the time passed in the audio file
-
+	if (!gtk_widget_is_sensitive(progress_bar) && is_sound_init)
+		gtk_widget_set_sensitive(progress_bar, TRUE);
+	if (!is_sound_init)
+		gtk_widget_set_sensitive(progress_bar, FALSE);
 	if (!is_sound_init || is_sound_paused) {
 		return G_SOURCE_CONTINUE;
 	}
@@ -309,7 +299,7 @@ static void on_volume_change(GtkRange* range, void* volume_data) {
 static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , GdkModifierType , void* data) {
     auto song_data = (song_controller*) data;
 	if (!song_data) {
-		logger.log("Error: song_data pointer is null", ERROR);
+		logger.log("song_data pointer is null", ERROR);
 		return GDK_EVENT_STOP;
 	}
 	auto bar = song_data->progress_bar;
@@ -320,10 +310,14 @@ static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , Gd
 			toggle_playback_state(GTK_BUTTON(song_data->play_button), NULL);
 			break;
 		case GDK_KEY_Left:
+			if (!gtk_widget_is_sensitive(bar))
+				return GDK_EVENT_STOP;
 			range_value -= 0.1;
 			if (range_value < 0) range_value = 0;
 			break;
 		case GDK_KEY_Right:
+			if (!gtk_widget_is_sensitive(bar))
+				return GDK_EVENT_STOP;
 			range_value += 0.1;
 			if (range_value > 1) range_value = 1;
 			break;
@@ -363,7 +357,7 @@ static void set_control_box(GtkWidget* control_button_box) {
 
 static void select_song(GtkListBox* box, GtkListBoxRow* , void* data) {
 	song_controller* control = reinterpret_cast<song_controller*>(data);
-	play_sound(GTK_BUTTON(control->play_button), control->progress_bar);
+	select_sound_from_list(GTK_BUTTON(control->play_button), control->progress_bar);
 	gtk_list_box_unselect_all(box);
 }
 
@@ -389,6 +383,8 @@ static GtkWidget* create_gui(GtkWidget* window) {
 		.progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1),
 		.volume_data = volume_data,
 	};
+
+	gtk_widget_set_sensitive(song_control->progress_bar, FALSE);
 
 	GtkWidget* progress_bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 	GtkWidget* control_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
