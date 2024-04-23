@@ -79,22 +79,26 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 	}
 }
 
-static void get_file_dialog_result( GObject* source_object, GAsyncResult* res,[[maybe_unused]] gpointer data ) {
-
-	GFile* file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source_object), res, NULL);
-	if (file == NULL)
-		return;
-
-	std::vector<std::string> file_names;
-	
+static void loop_folder(std::vector<std::string>& file_names, GFile* file) {
 	GFileEnumerator* enumerator = g_file_enumerate_children(file, "", G_FILE_QUERY_INFO_NONE, NULL, NULL);
 
+	
 	while(true) {
 		GFileInfo* current_file = g_file_enumerator_next_file(enumerator, NULL, NULL);
 		if (current_file == NULL)
 			break;
 
 		std::string file_name = g_file_info_get_name(current_file);
+
+		if (file_name.find(".") == std::string::npos) {
+			GFile* subfolder = g_file_get_child(file, file_name.c_str());
+			loop_folder(file_names, subfolder);
+			g_object_unref(subfolder);
+			continue;
+		}
+
+		// logger.log(file_name, INFO);
+
 		if (!check_valid_format(file_name))
 			continue;
 
@@ -106,10 +110,23 @@ static void get_file_dialog_result( GObject* source_object, GAsyncResult* res,[[
 		g_object_unref(current_file);
 	}
 
-	append_songs_to_list(&file_names);
 	g_file_enumerator_close(enumerator, NULL, NULL);
-	g_object_unref(file);
 	g_object_unref(enumerator);
+}
+
+static void get_file_dialog_result( GObject* source_object, GAsyncResult* res,[[maybe_unused]] gpointer data ) {
+
+	GFile* file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source_object), res, NULL);
+	if (file == NULL)
+		return;
+
+	std::vector<std::string> file_names;
+	
+	loop_folder(file_names, file);
+
+	append_songs_to_list(&file_names);
+
+	g_object_unref(file);
 }
 
 static void on_open_button_click([[maybe_unused]]GtkButton* a, void* user_data) {
@@ -181,6 +198,7 @@ static void select_sound_from_list(GtkButton* button, void* progress_bar) {
 	gtk_button_set_label(button, "Pause");
 
 }
+
 /**
  * @brief Resumes playback of the audio.
  * 
@@ -192,9 +210,9 @@ static void select_sound_from_list(GtkButton* button, void* progress_bar) {
  * after which it will proceed like normal
  */
 static void sound_continue(GtkButton* button) {
-    ma_sound_start(&sound);
-    is_sound_paused = false;
-    gtk_button_set_label(button, "Pause");
+	ma_sound_start(&sound);
+	is_sound_paused = false;
+	gtk_button_set_label(button, "Pause");
 }
 
 /**
@@ -207,10 +225,11 @@ static void sound_continue(GtkButton* button) {
  * @param button The button widget used for controlling playback.
  */
 static void sound_pause(GtkButton* button) {
-    ma_sound_stop(&sound);
-    is_sound_paused = true;
-    gtk_button_set_label(button, "Play");
+	ma_sound_stop(&sound);
+	is_sound_paused = true;
+	gtk_button_set_label(button, "Play");
 }
+
 
 /**
  * @brief Toggles between pausing and resuming playback of the audio.
@@ -218,9 +237,9 @@ static void sound_pause(GtkButton* button) {
  * @param button The button widget used for controlling playback.
  */
 static void toggle_playback_state(GtkButton* button, void* ) {
-    if (!is_sound_init)
-        return;
-    is_sound_paused ? sound_continue(button) : sound_pause(button);
+	if (!is_sound_init)
+		return;
+	is_sound_paused ? sound_continue(button) : sound_pause(button);
 }
 
 
@@ -238,13 +257,17 @@ static void on_timestamp_change(GtkRange* progress_bar, void*) {
 
 static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void* data) {
 	// * Moves the bar slider according to the time passed in the audio file
+
 	if (!gtk_widget_is_sensitive(progress_bar) && is_sound_init)
 		gtk_widget_set_sensitive(progress_bar, TRUE);
-	if (!is_sound_init)
+	
+	if (!is_sound_init) {
 		gtk_widget_set_sensitive(progress_bar, FALSE);
-	if (!is_sound_init || is_sound_paused) {
 		return G_SOURCE_CONTINUE;
 	}
+
+	if (is_sound_paused)
+		return G_SOURCE_CONTINUE;
 
 	if (ma_sound_at_end(&sound)) {
 		start_next_sound();
@@ -277,27 +300,27 @@ static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void
 }
 
 static void change_volume_icon(on_volume_change_data* data) {
-    if (volume >= 1)
-        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-overamplified-symbolic");
-    else if (volume > 0.7)
-        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-high-symbolic");
-    else if (volume > 0.4)
-        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-medium-symbolic");
-    else if (volume > 0)
-        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-low-symbolic");
-    else
-        gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-muted-symbolic");
+	if (volume >= 1)
+		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-overamplified-symbolic");
+	else if (volume > 0.7)
+		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-high-symbolic");
+	else if (volume > 0.4)
+		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-medium-symbolic");
+	else if (volume > 0)
+		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-low-symbolic");
+	else
+		gtk_image_set_from_icon_name(GTK_IMAGE(data->icon), "audio-volume-muted-symbolic");
 }
 
 static void on_volume_change(GtkRange* range, void* volume_data) {
-    auto data = (on_volume_change_data*) volume_data;
-    volume = gtk_range_get_value(range) / 100;
-    change_volume_icon(data);
-    ma_engine_set_volume(&engine, volume);
+	auto data = (on_volume_change_data*) volume_data;
+	volume = gtk_range_get_value(range) / 100;
+	change_volume_icon(data);
+	ma_engine_set_volume(&engine, volume);
 }
 
 static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , GdkModifierType , void* data) {
-    auto song_data = (song_controller*) data;
+	auto song_data = (song_controller*) data;
 	if (!song_data) {
 		logger.log("song_data pointer is null", ERROR);
 		return GDK_EVENT_STOP;
@@ -305,7 +328,7 @@ static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , Gd
 	auto bar = song_data->progress_bar;
 	double range_value = gtk_range_get_value(GTK_RANGE(bar));
 
-    switch (keyval) {
+	switch (keyval) {
 		case GDK_KEY_space:
 			toggle_playback_state(GTK_BUTTON(song_data->play_button), NULL);
 			break;
@@ -321,27 +344,27 @@ static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , Gd
 			range_value += 0.1;
 			if (range_value > 1) range_value = 1;
 			break;
-        case GDK_KEY_Up:
-            volume += 0.1;
-            if (volume > 1.0) volume = 1.0;
-            break;
-        case GDK_KEY_Down:
-            volume -= 0.1;
-            if (volume < 0.0) volume = 0.0;
-            break;
-        default:
-            break;
-    }
+		case GDK_KEY_Up:
+			volume += 0.1;
+			if (volume > 1.0) volume = 1.0;
+			break;
+		case GDK_KEY_Down:
+			volume -= 0.1;
+			if (volume < 0.0) volume = 0.0;
+			break;
+		default:
+			break;
+	}
 	if (!song_data->volume_data) {
-        logger.log("volume_data pointer is null", ERROR);
-        return GDK_EVENT_STOP;
-    }
+		logger.log("volume_data pointer is null", ERROR);
+		return GDK_EVENT_STOP;
+	}
 	gtk_range_set_value(GTK_RANGE(bar), range_value);
-    gtk_range_set_value(GTK_RANGE(song_data->volume_data->scale), volume * 100);
-    change_volume_icon(song_data->volume_data);
-    ma_engine_set_volume(&engine, volume);
+	gtk_range_set_value(GTK_RANGE(song_data->volume_data->scale), volume * 100);
+	change_volume_icon(song_data->volume_data);
+	ma_engine_set_volume(&engine, volume);
 
-    return GDK_EVENT_STOP;
+	return GDK_EVENT_STOP;
 }
 
 
