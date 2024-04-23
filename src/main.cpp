@@ -57,8 +57,10 @@ static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
 
 	for (auto ext : file_types) {
-		if (file_name.find(ext) != std::string_view::npos)
+		if (file_name.rfind(ext) == (file_name.size() - ext.size()))
 			return true;
+		// if (file_name.find(ext) != std::string_view::npos)
+		// 	return true;
 	}
 	return false;
 }
@@ -80,20 +82,30 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 }
 
 static void loop_folder(std::vector<std::string>& file_names, GFile* file) {
-	GFileEnumerator* enumerator = g_file_enumerate_children(file, "", G_FILE_QUERY_INFO_NONE, NULL, NULL);
 
+	GFileEnumerator* enumerator = g_file_enumerate_children(file, "", G_FILE_QUERY_INFO_NONE, NULL, NULL);
 	
+	if (enumerator == NULL)
+		return;
+
 	while(true) {
 		GFileInfo* current_file = g_file_enumerator_next_file(enumerator, NULL, NULL);
 		if (current_file == NULL)
 			break;
 
-		std::string file_name = g_file_info_get_name(current_file);
+		const char* file_name_cstr = g_file_info_get_name(current_file);
+        if (file_name_cstr == NULL) {
+            g_object_unref(current_file);
+            continue;
+        }
 
-		if (file_name.find(".") == std::string::npos) {
+        std::string file_name(file_name_cstr);
+
+		if (g_file_info_get_file_type(current_file) == G_FILE_TYPE_DIRECTORY) {
 			GFile* subfolder = g_file_get_child(file, file_name.c_str());
 			loop_folder(file_names, subfolder);
 			g_object_unref(subfolder);
+			g_object_unref(current_file);
 			continue;
 		}
 
