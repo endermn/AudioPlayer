@@ -8,7 +8,7 @@
 #include "Logger.hpp"
 
 #define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
+#include "include/miniaudio.h"
 
 
 std::vector<std::string> played_file_path;
@@ -17,10 +17,10 @@ ma_engine engine;
 
 ma_sound sound;
 ma_uint64 sound_length;
-float sound_length_s;
-int end_min;
-int end_s;
-std::string end_time;
+float sound_length_s = 0;
+int end_min = 0;
+int end_s = 0;
+std::string end_time = "";
 
 bool is_sound_init = false;
 bool is_sound_paused = false;
@@ -31,7 +31,7 @@ double volume = 0.1;
 
 GtkListBoxRow* selected_row = NULL;
 
-const std::array<std::string, 6> file_types = {".ogg", ".wav", ".mp3", ".flac", ".aiff", ".alac"}; 
+const std::array<std::string, 6> file_types = {".wav", ".mp3", ".flac"}; 
 
 gulong progress_bar_id = 0;
 gulong volume_bar_id = 0;
@@ -57,7 +57,12 @@ static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
 
 	for (auto ext : file_types) {
-		if (file_name.rfind(ext) == (file_name.size() - ext.size()))
+		std::size_t ext_index = file_name.find(ext);
+		if (ext_index == 0 || ext_index >= file_name.size())
+			continue;
+		std::cout << ext_index << '\n';
+
+		if (ext_index == (file_name.size() - ext.size()))
 			return true;
 		// if (file_name.find(ext) != std::string_view::npos)
 		// 	return true;
@@ -109,8 +114,9 @@ static void loop_folder(std::vector<std::string>& file_names, GFile* file) {
 			continue;
 		}
 
-		// logger.log(file_name, INFO);
-
+		// log(g_file_info_get_display_name(current_file), INFO);
+		// log(file_name, INFO);
+		log(file_name, INFO);
 		if (!check_valid_format(file_name))
 			continue;
 
@@ -163,14 +169,16 @@ static void play_sound(std::string played_file) {
 	ma_sound_uninit(&sound);
 
 	if (ma_sound_init_from_file(&engine, played_file.c_str(), 0, NULL, NULL, &sound) != MA_SUCCESS) {
-		logger.log("CANNOT INIT SOUND", ERROR);
+		log("CANNOT INIT SOUND", ERROR);
+		log(played_file, INFO);
 		return;
 	}
 
 	save_sound_length();
 
 	if (ma_sound_start(&sound) != MA_SUCCESS) {
-		logger.log("CANNOT START SOUND", ERROR);
+		log("CANNOT START SOUND", ERROR);
+		log(played_file, INFO);
 		return;
 	}
 }
@@ -334,7 +342,7 @@ static void on_volume_change(GtkRange* range, void* volume_data) {
 static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , GdkModifierType , void* data) {
 	auto song_data = (song_controller*) data;
 	if (!song_data) {
-		logger.log("song_data pointer is null", ERROR);
+		log("song_data pointer is null", ERROR);
 		return GDK_EVENT_STOP;
 	}
 	auto bar = song_data->progress_bar;
@@ -368,7 +376,7 @@ static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , Gd
 			break;
 	}
 	if (!song_data->volume_data) {
-		logger.log("volume_data pointer is null", ERROR);
+		log("volume_data pointer is null", ERROR);
 		return GDK_EVENT_STOP;
 	}
 	gtk_range_set_value(GTK_RANGE(bar), range_value);
@@ -516,11 +524,11 @@ int main(int argc, char* argv[])
 	engineConfig.pResourceManager = &resource_manager;
 
 	if (ma_engine_init(&engineConfig, &engine) != MA_SUCCESS) {
-		logger.log("failed to init engine from miniaudio", ERROR);
+		log("failed to init engine from miniaudio", ERROR);
 		std::abort();
 	}
 	
-	auto app = adw_application_new("org.gitcommitcrew.audio", G_APPLICATION_DEFAULT_FLAGS);
+	auto app = adw_application_new("org.player.audio", G_APPLICATION_DEFAULT_FLAGS);
 
 	g_signal_connect (app, "activate", G_CALLBACK (activate_cb), NULL);
 
