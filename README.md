@@ -1,7 +1,17 @@
-# How to compile
+# AuraBeat
+---
+
+Aurabeat is a C++ based audio player.
 
 ```
-Dependencies:
-    [dependency('gtk4'), 
-    dependency('libadwaita-1')]
+    Supported Audio formats:
+        'wav',
+        'mp3',
+        'flac'
+```
+
+```
+    Dependencies:
+        'gtk4', 
+        'libadwaita-1'
 ```

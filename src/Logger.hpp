@@ -8,34 +8,37 @@ enum LogLevel {
     WARNING,
     TRACE,
     DEBUG,
-    FATAL
+    FATAL,
+    DEFAULT
 };
 
+template<typename Message>
 
 
-void log(std::string message, LogLevel level) {
+void log(Message message, LogLevel level = LogLevel::DEFAULT) {
     switch(level) {
         case LogLevel::ERROR:
             printf("\x1B[31m[ERROR]\033[0m\t");
             std::cout << message << '\n';
-            
             break;
         case LogLevel::DEBUG:
-            std::cout << "[DEBUG] " << message << '\n';
+            std::cout << "[DEBUG]\t" << message << '\n';
             break;
         case LogLevel::FATAL:
-            std::cout << "[FATAL] " << message << '\n';
+            std::cout << "[FATAL]\t" << message << '\n';
             break;
         case LogLevel::INFO:
             printf("\x1B[94m[INFO]\033[0m\t");
             std::cout << message << '\n';
             break;
         case LogLevel::TRACE:
-            std::cout << "[TRACE] " << message << '\n';
+            std::cout << "[TRACE]\t" << message << '\n';
             break;
         case LogLevel::WARNING:
             printf("\x1B[33m[WARN]\033[0m\t");
             std::cout << message << '\n';
             break;
+        default:
+            std::cout << message << '\n';
     }
 }

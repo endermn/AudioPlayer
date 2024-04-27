@@ -33,9 +33,9 @@ GtkListBoxRow* selected_row = NULL;
 
 const std::array<std::string, 6> file_types = {".wav", ".mp3", ".flac"}; 
 
-gulong progress_bar_id = 0;
-gulong volume_bar_id = 0;
-gulong double_click_id = 0;
+long bar_id = 0;
+long volume_bar_id = 0;
+long double_click_id = 0;
 
 struct on_volume_change_data {
 	GtkWidget* scale;
@@ -60,7 +60,7 @@ static bool check_valid_format(std::string_view file_name) {
 		std::size_t ext_index = file_name.find(ext);
 		if (ext_index == 0 || ext_index >= file_name.size())
 			continue;
-		std::cout << ext_index << '\n';
+		// log(ext_index, INFO);
 
 		if (ext_index == (file_name.size() - ext.size()))
 			return true;
@@ -82,6 +82,7 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 		}
 		auto song_label = gtk_label_new(name.c_str());
 		gtk_widget_set_vexpand(song_label, false);
+		gtk_widget_set_halign(song_label, GTK_ALIGN_CENTER);
 		gtk_list_box_append(GTK_LIST_BOX(song_list), song_label);
 	}
 }
@@ -116,7 +117,8 @@ static void loop_folder(std::vector<std::string>& file_names, GFile* file) {
 
 		// log(g_file_info_get_display_name(current_file), INFO);
 		// log(file_name, INFO);
-		log(file_name, INFO);
+
+		// log(file_name, INFO);
 		if (!check_valid_format(file_name))
 			continue;
 
@@ -132,7 +134,7 @@ static void loop_folder(std::vector<std::string>& file_names, GFile* file) {
 	g_object_unref(enumerator);
 }
 
-static void get_file_dialog_result( GObject* source_object, GAsyncResult* res,[[maybe_unused]] gpointer data ) {
+static void get_file_dialog_result( GObject* source_object, GAsyncResult* res, void*) {
 
 	GFile* file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source_object), res, NULL);
 	if (file == NULL)
@@ -308,13 +310,13 @@ static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void
 	
 	gtk_label_set_text(GTK_LABEL(labels->start), current_time.c_str());
 
-	if (progress_bar_id != 0)
-		g_signal_handler_disconnect(bar, progress_bar_id);
+	if (bar_id != 0)
+		g_signal_handler_disconnect(bar, bar_id);
 	
 	gtk_label_set_text(GTK_LABEL(labels->start), gtk_label_get_text(GTK_LABEL(labels->start)));
 	gtk_range_set_value(bar, value);
 
-	progress_bar_id = g_signal_connect(progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
+	bar_id = g_signal_connect(progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
 
 	return G_SOURCE_CONTINUE;
 }
@@ -339,8 +341,9 @@ static void on_volume_change(GtkRange* range, void* volume_data) {
 	ma_engine_set_volume(&engine, volume);
 }
 
-static gboolean on_key_pressed(GtkEventControllerKey* , guint keyval, guint , GdkModifierType , void* data) {
+static gboolean on_key_pressed(GtkEventControllerKey* , int keyval, int, GdkModifierType, void* data) {
 	auto song_data = (song_controller*) data;
+
 	if (!song_data) {
 		log("song_data pointer is null", ERROR);
 		return GDK_EVENT_STOP;
@@ -404,12 +407,13 @@ static void select_song(GtkListBox* box, GtkListBoxRow* , void* data) {
 	gtk_list_box_unselect_all(box);
 }
 
-static GtkWidget* create_gui(GtkWidget* window) {
 /** @brief main function for the gui
  * @param window is used for the gui
 */
+static GtkWidget* create_gui(GtkWidget* window) {
+
 	GtkWidget* tool_bar = adw_header_bar_new();
-	
+
 	timestamp_labels* labels = new timestamp_labels{
 		.start = gtk_label_new("0:00"),
 		.end = gtk_label_new("0:00"),
@@ -463,7 +467,8 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	
 	gtk_widget_set_can_focus(song_control->progress_bar, FALSE);
 
-	progress_bar_id = g_signal_connect(song_control->progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
+	bar_id = g_signal_connect(song_control->progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
+
 	g_signal_connect(event_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
 	g_signal_connect(window_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
 	
@@ -527,7 +532,6 @@ int main(int argc, char* argv[])
 		log("failed to init engine from miniaudio", ERROR);
 		std::abort();
 	}
-	
 	auto app = adw_application_new("org.player.audio", G_APPLICATION_DEFAULT_FLAGS);
 
 	g_signal_connect (app, "activate", G_CALLBACK (activate_cb), NULL);
