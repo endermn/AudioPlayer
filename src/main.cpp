@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "Logger.hpp"
+#include "AudioReader.hpp"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "include/miniaudio.h"
@@ -17,6 +18,7 @@ ma_engine engine;
 
 ma_sound sound;
 ma_uint64 sound_length;
+
 float sound_length_s = 0;
 int end_min = 0;
 int end_s = 0;
@@ -52,6 +54,15 @@ struct song_controller {
 	on_volume_change_data* volume_data;
 };
 
+struct song_data {
+	std::string title;
+	std::string author;
+	std::string album;
+	std::string year;
+};
+
+song_data played_song{"", "", "", ""};
+
 
 static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
@@ -70,20 +81,54 @@ static bool check_valid_format(std::string_view file_name) {
 	return false;
 }
 
+static bool set_song_metadata(std::string file) {
+	ID3Tag tag;
+	bool val = extractID3Tag(file, tag);
+	played_song.album = tag.album;
+	played_song.author = tag.artist;
+	played_song.title = tag.title;
+	played_song.year = tag.year;
+
+	return val;
+}
+
 static void append_songs_to_list(std::vector<std::string>* file_names) {
 	// * Gets files from the file dialog result and adds them to a list box
+	std::vector<std::string> names = *file_names;
 
-	for (std::string name : *file_names) {
+	for (size_t i = 0; i < names.size(); i++) {
 		for (std::string ext : file_types) {
-			auto start_pos = name.find(ext);
-			if (start_pos > name.size())
+			auto start_pos = names[i].find(ext);
+			if (start_pos > names[i].size())
 				continue;
-			name.erase(start_pos, ext.size());
+			names[i].erase(start_pos, ext.size());
 		}
-		auto song_label = gtk_label_new(name.c_str());
-		gtk_widget_set_vexpand(song_label, false);
-		gtk_widget_set_halign(song_label, GTK_ALIGN_CENTER);
-		gtk_list_box_append(GTK_LIST_BOX(song_list), song_label);
+
+
+		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+		auto title = gtk_label_new(names[i].c_str());
+		gtk_box_append(GTK_BOX(song_box), title);
+
+		gtk_widget_set_vexpand(song_box, false);
+		gtk_widget_set_halign(song_box, GTK_ALIGN_START);
+
+		if (!set_song_metadata(played_file_path[i])) {
+			gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
+			continue;
+		}
+
+		auto artist = gtk_label_new(("- " + played_song.author).c_str());
+		auto album = gtk_label_new(("- " + played_song.album).c_str());
+		auto year = gtk_label_new(("- " + played_song.year).c_str());
+
+		gtk_box_append(GTK_BOX(song_box), artist);
+		gtk_box_append(GTK_BOX(song_box), album);
+		gtk_box_append(GTK_BOX(song_box), year);
+		
+
+
+		gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
+		
 	}
 }
 
@@ -184,6 +229,7 @@ static void play_sound(std::string played_file) {
 		return;
 	}
 }
+
 
 static void start_next_sound() {
 
@@ -446,7 +492,6 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	// gtk_constraint_layout_add_constraint();
 
 	song_list = gtk_list_box_new();
-
 
 	GtkGesture* controller = gtk_gesture_click_new();
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(controller), 0);

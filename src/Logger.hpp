@@ -28,7 +28,7 @@ void log(Message message, LogLevel level = LogLevel::DEFAULT) {
             std::cout << "[FATAL]\t" << message << '\n';
             break;
         case LogLevel::INFO:
-            printf("\x1B[94m[INFO]\033[0m\t");
+            printf("\x1B[92m[INFO]\033[0m\t");
             std::cout << message << '\n';
             break;
         case LogLevel::TRACE:
