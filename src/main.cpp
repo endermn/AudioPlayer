@@ -1,12 +1,16 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
+
+#include <taglib/taglib.h>
+#include <taglib/fileref.h>
+#include <taglib/tag.h>
+
 #include <format>
 #include <vector>
 #include <algorithm>
 #include <optional>
 
 #include "Logger.hpp"
-#include "AudioReader.hpp"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "include/miniaudio.h"
@@ -58,10 +62,11 @@ struct song_data {
 	std::string title;
 	std::string author;
 	std::string album;
-	std::string year;
+	std::string genre;
+	unsigned int year;
 };
 
-song_data played_song{"", "", "", ""};
+song_data played_song{"", "", "", "", 0};
 
 
 static bool check_valid_format(std::string_view file_name) {
@@ -82,14 +87,25 @@ static bool check_valid_format(std::string_view file_name) {
 }
 
 static bool set_song_metadata(std::string file) {
-	ID3Tag tag;
-	bool val = extractID3Tag(file, tag);
-	played_song.album = tag.album;
-	played_song.author = tag.artist;
-	played_song.title = tag.title;
-	played_song.year = tag.year;
+	TagLib::FileRef file_ref(file.c_str());
+	auto tag = file_ref.tag();
 
-	return val;
+	if (file_ref.isNull())
+		return false;
+
+	if (tag == nullptr)
+		return false;
+
+	played_song.title = tag->title().to8Bit(true);
+	played_song.author = tag->artist().to8Bit(true);
+	played_song.album = tag->album().to8Bit(true);
+	played_song.genre = tag->genre().to8Bit(true);
+
+	// played_song.year = tag->year();
+
+	// std::cout << played_song.year << '\n';
+
+	return true;
 }
 
 static void append_songs_to_list(std::vector<std::string>* file_names) {
@@ -119,11 +135,15 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 
 		auto artist = gtk_label_new(("- " + played_song.author).c_str());
 		auto album = gtk_label_new(("- " + played_song.album).c_str());
-		auto year = gtk_label_new(("- " + played_song.year).c_str());
+		auto genre = gtk_label_new(("- " + played_song.genre).c_str());
+
+		// int year_int =  played_song.year;
+		// auto year = gtk_label_new("" + year_int);
 
 		gtk_box_append(GTK_BOX(song_box), artist);
 		gtk_box_append(GTK_BOX(song_box), album);
-		gtk_box_append(GTK_BOX(song_box), year);
+		gtk_box_append(GTK_BOX(song_box), genre);
+		// gtk_box_append(GTK_BOX(song_box), year);
 		
 
 
