@@ -43,6 +43,15 @@ long bar_id = 0;
 long volume_bar_id = 0;
 long double_click_id = 0;
 
+enum class song_info {
+	TITLE,
+	AUTHOR,
+	ALBUM,
+	GENRE,
+	FIRST = song_info::TITLE,
+	LAST = song_info::GENRE
+};
+
 struct on_volume_change_data {
 	GtkWidget* scale;
 	GtkWidget* icon;
@@ -121,9 +130,8 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 		}
 
 
-		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-		auto title = gtk_label_new(names[i].c_str());
-		gtk_box_append(GTK_BOX(song_box), title);
+		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 100);
+
 
 		gtk_widget_set_vexpand(song_box, false);
 		gtk_widget_set_halign(song_box, GTK_ALIGN_START);
@@ -133,20 +141,34 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 			continue;
 		}
 
-		auto artist = gtk_label_new(("- " + played_song.author).c_str());
-		auto album = gtk_label_new(("- " + played_song.album).c_str());
-		auto genre = gtk_label_new(("- " + played_song.genre).c_str());
-
+		// auto title = gtk_label_new(played_song.title.c_str());
+		// auto artist = gtk_label_new(played_song.author.c_str());
+		// auto album = gtk_label_new(played_song.album.c_str());
+		// auto genre = gtk_label_new(played_song.genre.c_str());
+		std::array<GtkWidget*, 4> song_labels = {
+			gtk_label_new(played_song.title.c_str()),
+			gtk_label_new(played_song.author.c_str()),
+			gtk_label_new(played_song.album.c_str()),
+			gtk_label_new(played_song.genre.c_str())
+		};
+		
+		// std::cout << played_song.title;
+		for (int x = 0; x <= (int)song_info::LAST; x++) {
+			std::cout << "aligning left" << '\n';
+			gtk_widget_set_hexpand(song_labels[x], true);
+			gtk_widget_set_halign(song_labels[x], GTK_ALIGN_START);
+			gtk_widget_set_size_request(song_labels[x], 200, 30);
+		}
 		// int year_int =  played_song.year;
 		// auto year = gtk_label_new("" + year_int);
 
-		gtk_box_append(GTK_BOX(song_box), artist);
-		gtk_box_append(GTK_BOX(song_box), album);
-		gtk_box_append(GTK_BOX(song_box), genre);
+		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::TITLE]);
+		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::AUTHOR]);
+		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::ALBUM]);
+		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::GENRE]);
+
 		// gtk_box_append(GTK_BOX(song_box), year);
 		
-
-
 		gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
 		
 	}
