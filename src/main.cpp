@@ -60,8 +60,20 @@ struct timestamp_labels {
 	GtkWidget* start;
 	GtkWidget* end;
 };
+
+struct song_info_box {
+	GtkWidget* title;
+	GtkWidget* artist;
+	GtkWidget* album;
+	GtkWidget* genre; 
+	GtkWidget* year;
+	GtkWidget* icon;
+};
+
 struct song_controller {
 	GtkWidget* play_button;
+	GtkWidget* prev_button;
+	GtkWidget* next_button;
 	GtkWidget* open_button;
 	GtkWidget* progress_bar;
 	on_volume_change_data* volume_data;
@@ -75,6 +87,7 @@ struct song_data {
 	unsigned int year;
 };
 
+song_info_box* info_box;
 song_data played_song{"", "", "", "", 0};
 
 
@@ -110,6 +123,7 @@ static bool set_song_metadata(std::string file) {
 	played_song.album = tag->album().to8Bit(true);
 	played_song.genre = tag->genre().to8Bit(true);
 
+
 	// played_song.year = tag->year();
 
 	// std::cout << played_song.year << '\n';
@@ -132,10 +146,6 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 
 		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 100);
 
-
-		gtk_widget_set_vexpand(song_box, false);
-		gtk_widget_set_halign(song_box, GTK_ALIGN_START);
-
 		if (!set_song_metadata(played_file_path[i])) {
 			gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
 			continue;
@@ -154,7 +164,7 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 		
 		// std::cout << played_song.title;
 		for (int x = 0; x <= (int)song_info::LAST; x++) {
-			std::cout << "aligning left" << '\n';
+			// std::cout << "aligning left" << '\n';
 			gtk_widget_set_hexpand(song_labels[x], true);
 			gtk_widget_set_halign(song_labels[x], GTK_ALIGN_START);
 			gtk_widget_set_size_request(song_labels[x], 200, 30);
@@ -182,6 +192,7 @@ static void loop_folder(std::vector<std::string>& file_names, GFile* file) {
 		return;
 
 	while(true) {
+
 		GFileInfo* current_file = g_file_enumerator_next_file(enumerator, NULL, NULL);
 		if (current_file == NULL)
 			break;
@@ -270,6 +281,9 @@ static void play_sound(std::string played_file) {
 		log(played_file, INFO);
 		return;
 	}
+	set_song_metadata(played_file);
+	gtk_label_set_text(GTK_LABEL(info_box->title), played_song.title.c_str());
+	gtk_label_set_text(GTK_LABEL(info_box->artist), played_song.author.c_str());
 }
 
 
@@ -340,7 +354,6 @@ static void sound_pause(GtkButton* button) {
 	gtk_button_set_label(button, "Play");
 }
 
-
 /**
  * @brief Toggles between pausing and resuming playback of the audio.
  * 
@@ -350,6 +363,25 @@ static void toggle_playback_state(GtkButton* button, void* ) {
 	if (!is_sound_init)
 		return;
 	is_sound_paused ? sound_continue(button) : sound_pause(button);
+}
+
+static void prev_song(GtkButton* , void* ) {
+	if (!is_sound_init)
+		return;
+
+	int new_row_index = gtk_list_box_row_get_index(selected_row) - 1;
+
+	new_row_index = new_row_index < 0 ? 0 : new_row_index;
+
+	play_sound(played_file_path[new_row_index]);
+
+	selected_row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(song_list), new_row_index);
+}
+
+static void next_song(GtkButton* , void*) {
+	if (!is_sound_init)
+		return;
+	start_next_sound();
 }
 
 
@@ -387,6 +419,9 @@ static gboolean progress_bar_tick(GtkWidget* progress_bar, GdkFrameClock* , void
 	auto bar = GTK_RANGE(progress_bar);
 	auto labels = (timestamp_labels *) data;
 	double value = double (ma_sound_get_time_in_pcm_frames(&sound)) / double(sound_length);
+
+	// if (value == 0)
+	// 	log(played_song.title);
 
 	gtk_label_set_text(GTK_LABEL(labels->end), end_time.c_str());
 
@@ -507,6 +542,17 @@ static GtkWidget* create_gui(GtkWidget* window) {
 		.end = gtk_label_new("0:00"),
 	};
 
+	info_box = new song_info_box {
+		gtk_label_new(""),
+		gtk_label_new(""),
+		gtk_label_new(""),
+		gtk_label_new(""),
+		gtk_label_new(""),
+		gtk_label_new(""),
+	}; 
+
+	
+
 	on_volume_change_data* volume_data = new on_volume_change_data {
 		.scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1),
 		.icon = gtk_image_new_from_icon_name("audio-volume-medium-symbolic"),
@@ -514,6 +560,8 @@ static GtkWidget* create_gui(GtkWidget* window) {
 
 	song_controller* song_control = new song_controller{
 		.play_button = gtk_button_new_with_label("Play"),
+		.prev_button = gtk_button_new_with_label("Prev"),
+		.next_button = gtk_button_new_with_label("Next"),
 		.open_button = gtk_button_new_with_label("Open"),
 		.progress_bar = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1, 0.1),
 		.volume_data = volume_data,
@@ -534,6 +582,7 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	// gtk_constraint_layout_add_constraint();
 
 	song_list = gtk_list_box_new();
+
 
 	GtkGesture* controller = gtk_gesture_click_new();
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(controller), 0);
@@ -560,7 +609,10 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	g_signal_connect(window_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
 	
 	volume_bar_id = g_signal_connect(volume_data->scale, "value-changed", G_CALLBACK(on_volume_change), volume_data);
+	
+	g_signal_connect(song_control->prev_button, "clicked", G_CALLBACK(prev_song), NULL);
 	g_signal_connect(song_control->play_button, "clicked", G_CALLBACK (toggle_playback_state), NULL);
+	g_signal_connect(song_control->next_button, "clicked", G_CALLBACK(next_song), NULL);
 	// g_signal_connect(pause_button, "clicked", G_CALLBACK(on_pause_button_click), NULL);
 	g_signal_connect(song_control->open_button, "clicked", G_CALLBACK(on_open_button_click), window);
 	g_signal_connect(song_list, "row-activated", G_CALLBACK(select_song), song_control);
@@ -572,14 +624,20 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	gtk_widget_add_tick_callback(song_control->progress_bar, progress_bar_tick, labels, NULL);
 	
 	GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
+	
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrollable_song_box), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrollable_song_box), song_list);
 
+	gtk_box_append(GTK_BOX(control_button_box), song_control->prev_button);
 	gtk_box_append(GTK_BOX(control_button_box), song_control->play_button);
+	gtk_box_append(GTK_BOX(control_button_box), song_control->next_button);
 	gtk_box_append(GTK_BOX(control_button_box), song_control->open_button);
 	gtk_box_append(GTK_BOX(control_button_box), volume_data->icon);
 	gtk_box_append(GTK_BOX(control_button_box), volume_data->scale);
 
+	gtk_box_append(GTK_BOX(progress_bar_box), info_box->title);
+	gtk_box_append(GTK_BOX(progress_bar_box), gtk_label_new("-"));
+	gtk_box_append(GTK_BOX(progress_bar_box), info_box->artist);
 	gtk_box_append(GTK_BOX(progress_bar_box), labels->start);
 	gtk_box_append(GTK_BOX(progress_bar_box), song_control->progress_bar);
 	gtk_box_append(GTK_BOX(progress_bar_box), labels->end);
