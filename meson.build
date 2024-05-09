@@ -9,6 +9,6 @@ gtkdep = [
   ]
 
 executable('AudioPlayer',
-           'src/main.cpp',
-           install : true,
-           dependencies : gtkdep)
+          'src/main.cpp',
+          install : true,
+          dependencies : gtkdep)

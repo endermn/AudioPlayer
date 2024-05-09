@@ -4,6 +4,12 @@
 #include <taglib/taglib.h>
 #include <taglib/fileref.h>
 #include <taglib/tag.h>
+#include <taglib/taglib_export.h>
+#include <taglib/taglib_config.h>
+#include <taglib/mpegfile.h>
+#include <taglib/attachedpictureframe.h>
+#include <taglib/id3v2tag.h>
+#include <taglib/flacfile.h>
 
 #include <format>
 #include <vector>
@@ -14,7 +20,6 @@
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "include/miniaudio.h"
-
 
 std::vector<std::string> played_file_path;
 
@@ -112,7 +117,7 @@ static bool set_song_metadata(std::string file) {
 	TagLib::FileRef file_ref(file.c_str());
 	auto tag = file_ref.tag();
 
-	if (file_ref.isNull())
+	if (file_ref.isNull())	
 		return false;
 
 	if (tag == nullptr)
@@ -122,8 +127,6 @@ static bool set_song_metadata(std::string file) {
 	played_song.author = tag->artist().to8Bit(true);
 	played_song.album = tag->album().to8Bit(true);
 	played_song.genre = tag->genre().to8Bit(true);
-
-
 	// played_song.year = tag->year();
 
 	// std::cout << played_song.year << '\n';
@@ -144,7 +147,7 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 		}
 
 
-		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 100);
+		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 30);
 
 		if (!set_song_metadata(played_file_path[i])) {
 			gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
@@ -165,9 +168,23 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 		// std::cout << played_song.title;
 		for (int x = 0; x <= (int)song_info::LAST; x++) {
 			// std::cout << "aligning left" << '\n';
-			gtk_widget_set_hexpand(song_labels[x], true);
-			gtk_widget_set_halign(song_labels[x], GTK_ALIGN_START);
-			gtk_widget_set_size_request(song_labels[x], 200, 30);
+			// gtk_widget_set_hexpand(song_labels[x], true);
+			GtkWidget* label = song_labels[x];
+
+			std::string label_text(gtk_label_get_text(GTK_LABEL(label)));
+			// long unsigned int max_size = 15;
+
+			// if (label_text.length() > max_size)
+			// 	label_text.replace(max_size, label_text.length() - max_size, "...");
+
+			gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+
+			gtk_label_set_text(GTK_LABEL(label), label_text.c_str());
+			gtk_widget_set_size_request(label, 200, 30);
+			gtk_label_set_xalign(GTK_LABEL(label), 0);
+			gtk_widget_set_halign(label, GTK_ALIGN_START);
+			// ? THIS SEEMS TO RETURN 0?
+			// std::cout << gtk_widget_get_width(label) << '\n';
 		}
 		// int year_int =  played_song.year;
 		// auto year = gtk_label_new("" + year_int);
@@ -638,6 +655,7 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	gtk_box_append(GTK_BOX(progress_bar_box), info_box->title);
 	gtk_box_append(GTK_BOX(progress_bar_box), gtk_label_new("-"));
 	gtk_box_append(GTK_BOX(progress_bar_box), info_box->artist);
+
 	gtk_box_append(GTK_BOX(progress_bar_box), labels->start);
 	gtk_box_append(GTK_BOX(progress_bar_box), song_control->progress_bar);
 	gtk_box_append(GTK_BOX(progress_bar_box), labels->end);
