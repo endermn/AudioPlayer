@@ -92,9 +92,35 @@ struct song_data {
 	unsigned int year;
 };
 
+struct _song_row : GObject {
+	std::array<std::string, 4> info;
+};
+
+
+G_DECLARE_FINAL_TYPE(song_row, song_row, , SONG_ROW, GObject)
+
+G_DEFINE_TYPE(song_row, song_row, G_TYPE_OBJECT)
+
+song_row* song_row_new(std::array<std::string, 4> info) {
+	song_row* row = (song_row*)g_object_new(song_row_get_type(), NULL);
+	row->info = info;
+	return row;
+}
+
+void song_row_init(song_row* ) {
+
+}
+
+void song_row_class_init(song_rowClass* ) {
+
+}
+
 song_info_box* info_box;
 song_data played_song{"", "", "", "", 0};
 
+GListStore* song_store = g_list_store_new(song_row_get_type());
+GtkSingleSelection* song_selection = gtk_single_selection_new(G_LIST_MODEL(song_store));
+GtkListItemFactory* factory = gtk_signal_list_item_factory_new();
 
 static bool check_valid_format(std::string_view file_name) {
 	// * goes through every file in the file dialog and checks weather the type is correct
@@ -138,7 +164,7 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 	// * Gets files from the file dialog result and adds them to a list box
 	std::vector<std::string> names = *file_names;
 
-	for (size_t i = 0; i < names.size(); i++) {
+	for (std::size_t i = 0; i < names.size(); i++) {
 		for (std::string ext : file_types) {
 			auto start_pos = names[i].find(ext);
 			if (start_pos > names[i].size())
@@ -147,56 +173,61 @@ static void append_songs_to_list(std::vector<std::string>* file_names) {
 		}
 
 
-		GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 30);
+		// GtkWidget* song_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 30);
 
 		if (!set_song_metadata(played_file_path[i])) {
-			gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
+			// gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
 			continue;
 		}
 
-		// auto title = gtk_label_new(played_song.title.c_str());
-		// auto artist = gtk_label_new(played_song.author.c_str());
-		// auto album = gtk_label_new(played_song.album.c_str());
-		// auto genre = gtk_label_new(played_song.genre.c_str());
-		std::array<GtkWidget*, 4> song_labels = {
-			gtk_label_new(played_song.title.c_str()),
-			gtk_label_new(played_song.author.c_str()),
-			gtk_label_new(played_song.album.c_str()),
-			gtk_label_new(played_song.genre.c_str())
+		auto title = played_song.title;
+		auto artist = played_song.author;
+		auto album = played_song.album;
+		auto genre = played_song.genre;
+		std::array<std::string, 4> song_labels = {
+			title,
+			artist,
+			album,
+			genre,
 		};
-		
+
+		song_row* row = song_row_new(song_labels);
+		for(int i = 0; i < 4; ++i)
+			g_list_store_append(song_store, row);
+
+
 		// std::cout << played_song.title;
-		for (int x = 0; x <= (int)song_info::LAST; x++) {
+		// for (int x = 0; x <= (int)song_info::LAST; x++) {
 			// std::cout << "aligning left" << '\n';
 			// gtk_widget_set_hexpand(song_labels[x], true);
-			GtkWidget* label = song_labels[x];
+			// GtkWidget* label = song_labels[x];
 
-			std::string label_text(gtk_label_get_text(GTK_LABEL(label)));
+			// std::string label_text(gtk_label_get_text(GTK_LABEL(label)));
 			// long unsigned int max_size = 15;
 
 			// if (label_text.length() > max_size)
 			// 	label_text.replace(max_size, label_text.length() - max_size, "...");
 
-			gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+			// gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
 
-			gtk_label_set_text(GTK_LABEL(label), label_text.c_str());
-			gtk_widget_set_size_request(label, 200, 30);
-			gtk_label_set_xalign(GTK_LABEL(label), 0);
-			gtk_widget_set_halign(label, GTK_ALIGN_START);
-			// ? THIS SEEMS TO RETURN 0?
+			// gtk_label_set_text(GTK_LABEL(label), label_text.c_str());
+			// gtk_widget_set_size_request(label, 200, 30);
+			// gtk_label_set_xalign(GTK_LABEL(label), 0);
+			// gtk_widget_set_halign(label, GTK_ALIGN_START);
+		//	// ? THIS SEEMS TO RETURN 0?
 			// std::cout << gtk_widget_get_width(label) << '\n';
-		}
+		// }
 		// int year_int =  played_song.year;
 		// auto year = gtk_label_new("" + year_int);
-
-		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::TITLE]);
-		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::AUTHOR]);
-		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::ALBUM]);
-		gtk_box_append(GTK_BOX(song_box), song_labels[(int)song_info::GENRE]);
+		
+		// gtk_grid_attach(GTK_GRID(song_list), song_labels[(int)song_info::TITLE], 0, i, 1, 1);
+		// gtk_grid_attach(GTK_GRID(song_list), song_labels[(int)song_info::AUTHOR], 1, i, 1, 1);
+		// gtk_grid_attach(GTK_GRID(song_list), song_labels[(int)song_info::ALBUM], 2, i, 1, 1);
+		// gtk_grid_attach(GTK_GRID(song_list), song_labels[(int)song_info::GENRE], 3, i, 1, 1);
 
 		// gtk_box_append(GTK_BOX(song_box), year);
-		
-		gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
+
+		// gtk_list_box_append(GTK_LIST_BOX(song_list), song_box);
 		
 	}
 }
@@ -547,6 +578,27 @@ static void select_song(GtkListBox* box, GtkListBoxRow* , void* data) {
 	gtk_list_box_unselect_all(box);
 }
 
+static void factory_bind(GtkSignalListItemFactory* , GObject* obj, void*){
+	auto list_item = GTK_LIST_ITEM(obj);
+	gtk_list_item_set_selectable(list_item, true);
+	// g_list_store_
+	// g_list_model_get_item(G_LIST_MODEL(obj), 0);
+	void* item = g_list_model_get_item(G_LIST_MODEL(song_store), gtk_list_item_get_position(list_item));
+	
+	// if (item == NULL)
+	// 	return;
+	assert(item != NULL);
+	int index = gtk_list_item_get_position(list_item) % 4;
+	gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(list_item)) ,((song_row*)item)->info[index].c_str());
+	
+	g_object_unref(item);
+}
+
+static void factory_setup(GtkSignalListItemFactory* , GObject* obj, void*) {
+	gtk_list_item_set_child(GTK_LIST_ITEM(obj), gtk_label_new(NULL));
+}
+
+
 /** @brief main function for the gui
  * @param window is used for the gui
 */
@@ -598,8 +650,11 @@ static GtkWidget* create_gui(GtkWidget* window) {
 
 	// gtk_constraint_layout_add_constraint();
 
-	song_list = gtk_list_box_new();
+	song_list = gtk_grid_view_new(GTK_SELECTION_MODEL(song_selection), factory);
 
+	gtk_grid_view_set_single_click_activate(GTK_GRID_VIEW(song_list), true);
+	gtk_grid_view_set_max_columns(GTK_GRID_VIEW(song_list), 4);
+	gtk_grid_view_set_min_columns(GTK_GRID_VIEW(song_list), 4);
 
 	GtkGesture* controller = gtk_gesture_click_new();
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(controller), 0);
@@ -622,6 +677,9 @@ static GtkWidget* create_gui(GtkWidget* window) {
 
 	bar_id = g_signal_connect(song_control->progress_bar, "value-changed", G_CALLBACK(on_timestamp_change), NULL);
 
+	g_signal_connect(factory, "setup", G_CALLBACK(factory_setup), NULL);
+	g_signal_connect(factory, "bind", G_CALLBACK(factory_bind), NULL);
+
 	g_signal_connect(event_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
 	g_signal_connect(window_controller, "key-pressed", G_CALLBACK(on_key_pressed), song_control);
 	
@@ -632,7 +690,7 @@ static GtkWidget* create_gui(GtkWidget* window) {
 	g_signal_connect(song_control->next_button, "clicked", G_CALLBACK(next_song), NULL);
 	// g_signal_connect(pause_button, "clicked", G_CALLBACK(on_pause_button_click), NULL);
 	g_signal_connect(song_control->open_button, "clicked", G_CALLBACK(on_open_button_click), window);
-	g_signal_connect(song_list, "row-activated", G_CALLBACK(select_song), song_control);
+	g_signal_connect(song_list, "activate", G_CALLBACK(select_song), song_control);
 	// g_signal_connect_after(controller, "released", G_CALLBACK(on_double_click), progress_bar);
 
 	gtk_widget_add_controller(window, window_controller);

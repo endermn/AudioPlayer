@@ -1,17 +1,20 @@
 # AuraBeat
 ---
 
-Aurabeat is a C++ based audio player.
+## A currently being worked on Audio Player for linux and mac.
 
-```
-    Supported Audio formats:
-        'wav',
-        'mp3',
-        'flac'
-```
+This project was created to attempt improving already existing audio players, that unfortunately have some missing features on mac/linux
 
-```
-    Dependencies:
-        'gtk4', 
-        'libadwaita-1'
-```
+The main issues this project is trying to solve is:
+
+* Better support for playing local files
+* Structurizing the files' paths
+
+## To compile you can do the following:
+
+1. clone this project
+2. install meson (you can learn more about how to do that on their page)
+3. run ```meson setup build``` to create the build directory
+4. open it with ```cd build``` 
+5. run ```meson compile```
+6. open your executable
